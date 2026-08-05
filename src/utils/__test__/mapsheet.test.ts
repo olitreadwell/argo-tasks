@@ -105,3 +105,55 @@ describe('MapSheets', () => {
     });
   }
 });
+
+describe('getMapTileIndex parsing', () => {
+  it('should parse a 1:50k sheet name with no tile id', () => {
+    const index = MapSheet.getMapTileIndex('AS21.tiff');
+    assert.equal(index?.mapSheet, 'AS21');
+    assert.equal(index?.gridSize, 50_000);
+  });
+
+  // One valid tile name per grid size. Tile ids use 2 digits per axis, except
+  // 1:500 which uses 3. Every axis value is inside the sheet's tile grid.
+  const validTiles = [
+    { name: 'BP27_10000_0102', gridSize: 10_000, y: 1, x: 2 },
+    { name: 'BP27_5000_0203', gridSize: 5_000, y: 2, x: 3 },
+    { name: 'BP27_2000_0102', gridSize: 2_000, y: 1, x: 2 },
+    { name: 'BP27_1000_4817', gridSize: 1_000, y: 48, x: 17 },
+    { name: 'CG10_500_080037', gridSize: 500, y: 80, x: 37 },
+  ] as const;
+
+  for (const tile of validTiles) {
+    it(`should parse valid tile name ${tile.name}`, () => {
+      const index = MapSheet.getMapTileIndex(tile.name);
+      assert.equal(index?.gridSize, tile.gridSize);
+      assert.equal(index?.x, tile.x);
+      assert.equal(index?.y, tile.y);
+    });
+  }
+
+  it('should parse a tile name with a prefix and file extension', () => {
+    const index = MapSheet.getMapTileIndex('2022_CG10_500_080037.tiff');
+    assert.equal(index?.x, 37);
+    assert.equal(index?.y, 80);
+  });
+
+  // Names that cannot be faithfully parsed must return null rather than a tile
+  // with silently-wrong coordinates.
+  const invalidNames = [
+    { name: 'no-map-sheet-here.tiff', why: 'no sheet code' },
+    { name: 'BP27_1000_48', why: 'missing x component (would parse x as 0)' },
+    { name: 'CG10_500_080', why: 'missing x component at 1:500' },
+    { name: 'BP27_1000_481', why: 'tile id too short (3 digits, expected 4)' },
+    { name: 'CG10_500_08003', why: 'tile id too short at 1:500 (5 digits, expected 6)' },
+    { name: 'BP27_1000_48170', why: 'tile id too long (5 digits, expected 4)' },
+    { name: 'BP27_1000_0050', why: 'tile y is 0, outside the 1-indexed grid' },
+    { name: 'BP27_1000_9999', why: 'tile 99,99 is outside a 50x50 grid' },
+  ] as const;
+
+  for (const invalid of invalidNames) {
+    it(`should return null for ${invalid.name} (${invalid.why})`, () => {
+      assert.equal(MapSheet.getMapTileIndex(invalid.name), null);
+    });
+  }
+});
