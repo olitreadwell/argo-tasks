@@ -149,6 +149,8 @@ describe('getMapTileIndex parsing', () => {
     { name: 'BP27_1000_48170', why: 'tile id too long (5 digits, expected 4)' },
     { name: 'BP27_1000_0050', why: 'tile y is 0, outside the 1-indexed grid' },
     { name: 'BP27_1000_9999', why: 'tile 99,99 is outside a 50x50 grid' },
+    { name: 'BC99_1000_0101.tiff', why: 'BC99 matches the sheet code shape but is not a known sheet' },
+    { name: 'AAAA.tiff', why: 'AAAA matches the sheet code shape but is not a known sheet' },
   ] as const;
 
   for (const invalid of invalidNames) {

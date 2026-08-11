@@ -95,14 +95,16 @@ export const MapSheet = {
   /**
    * Get the expected origin and map sheet information from a file name
    *
-   * Returns `null` when the name has no map sheet code, or when it has a tile id
-   * that cannot be a real tile (wrong number of digits, or a tile outside the
-   * sheet's grid). This avoids returning silently-wrong coordinates.
+   * Returns `null` when the name has no map sheet code, when the map sheet code is
+   * not one of the known sheets, or when it has a tile id that cannot be a real
+   * tile (wrong number of digits, or a tile outside the sheet's grid). This avoids
+   * returning silently-wrong coordinates.
    *
    * @example
    * ```typescript
    * MapSheet.getMapTileIndex("BP27_1000_4817.tiff") // { mapSheet: "BP27", gridSize: 1000, x: 17, y:48 }
    * MapSheet.getMapTileIndex("BP27_1000_481.tiff")  // null (tile id too short)
+   * MapSheet.getMapTileIndex("BC99_1000_0101.tiff") // null (BC99 is not a known sheet)
    * ```
    */
   getMapTileIndex(fileName: string): MapTileIndex | null {
@@ -111,6 +113,10 @@ export const MapSheet = {
 
     const sheetCode = match?.groups?.['sheetCode'];
     if (sheetCode == null) return null;
+    // A code can match the sheet code shape ([A-Z]{2}\d{2}) without being a real
+    // sheet, e.g. "BC99". Reject those rather than computing an origin for a
+    // sheet that does not exist.
+    if (!MapSheet.isKnown(sheetCode)) return null;
 
     const gridSize = Number(match?.groups?.['gridSize'] ?? MapSheetTileGridSize);
     const out: MapTileIndex = {
