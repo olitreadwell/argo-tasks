@@ -432,8 +432,8 @@ describe('GSD handling', () => {
     concurrency: 1,
   };
   const fakeTiff1 = FakeCogTiff.fromTileName('AS21_1000_0101');
-  const fakeTiff2 = FakeCogTiff.fromTileName('AT21_1000_0101');
-  const fakeTiff3 = FakeCogTiff.fromTileName('AU21_1000_0101');
+  const fakeTiff2 = FakeCogTiff.fromTileName('AT24_1000_0101');
+  const fakeTiff3 = FakeCogTiff.fromTileName('AU24_1000_0101');
 
   it('should fail if GSDs are inconsistent', async (t) => {
     fakeTiff1.images[0].resolution[0] = 1.23;
