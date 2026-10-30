@@ -106,6 +106,10 @@ function computeMapTileIndex(fileName: string, mapSheet: MapSheetLike): MapTileI
 
   const sheetCode = match?.groups?.['sheetCode'];
   if (sheetCode == null) return null;
+  // A code can match the sheet code shape ([A-Z]{2}\d{2}) without being a real
+  // sheet, e.g. "BC99". Reject those rather than computing an origin for a
+  // sheet that does not exist.
+  if (!mapSheet.isKnown(sheetCode)) return null;
 
   const gridSize = Number(match?.groups?.['gridSize'] ?? MapSheetTileGridSize);
   const out: MapTileIndex = {
@@ -132,15 +136,22 @@ function computeMapTileIndex(fileName: string, mapSheet: MapSheetLike): MapTileI
     return out;
   }
 
-  // 1:500 has X/Y is 3 digits not 2
-  if (out.gridSize === 500) {
-    out.y = Number(match?.groups?.['tileId']?.slice(0, 3));
-    out.x = Number(match?.groups?.['tileId']?.slice(3));
-  } else {
-    out.y = Number(match?.groups?.['tileId']?.slice(0, 2));
-    out.x = Number(match?.groups?.['tileId']?.slice(2));
-  }
+  // Tile ids use a fixed number of digits per axis: 3 for 1:500, 2 for every
+  // other grid size (the same widths getTileName pads to). A tile id of any
+  // other length is a malformed name, not a real tile, so reject it rather
+  // than slicing it into silently-wrong coordinates.
+  const tileId = match?.groups?.['tileId'];
+  const digitsPerAxis = out.gridSize === 500 ? 3 : 2;
+  if (tileId == null || tileId.length !== digitsPerAxis * 2) return null;
+
+  out.y = Number(tileId.slice(0, digitsPerAxis));
+  out.x = Number(tileId.slice(digitsPerAxis));
   if (isNaN(out.gridSize) || isNaN(out.x) || isNaN(out.y)) return null;
+
+  // Tiles are 1-indexed and cannot fall outside the sheet's tile grid, so a
+  // reference like tile 0 or a tile beyond the grid is not a real tile.
+  const tilesPerAxis = Math.floor(MapSheetTileGridSize / out.gridSize);
+  if (out.x < 1 || out.x > tilesPerAxis || out.y < 1 || out.y > tilesPerAxis) return null;
 
   const origin = mapSheet.offset(out.mapSheet);
 
@@ -206,13 +217,22 @@ export const MapSheet = {
   /**
    * Get the expected origin and map sheet information from a file name
    *
+   * Returns `null` when the name has no map sheet code, when the map sheet code is
+   * not one of the known sheets, or when it has a tile id that cannot be a real
+   * tile (wrong number of digits, or a tile outside the sheet's grid). This avoids
+   * returning silently-wrong coordinates.
+   *
    * @example
    * ```typescript
    * MapSheet.getMapTileIndex("BP27_1000_4817.tiff") // { mapSheet: "BP27", gridSize: 1000, x: 17, y:48 }
+   * MapSheet.getMapTileIndex("BP27_1000_481.tiff")  // null (tile id too short)
+   * MapSheet.getMapTileIndex("BC99_1000_0101.tiff") // null (BC99 is not a known sheet)
    * ```
    */
   getMapTileIndex(fileName: string): MapTileIndex | null {
     return computeMapTileIndex(fileName, MapSheet);
+
+
   },
   /**
    * Calculate the expected X & Y origin point for a map sheet
