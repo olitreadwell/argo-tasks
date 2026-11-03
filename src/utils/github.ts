@@ -1,6 +1,7 @@
+import { createAppAuth } from '@octokit/auth-app';
 import { Octokit } from '@octokit/core';
+import type { Api } from '@octokit/plugin-rest-endpoint-methods';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
-import type { Api } from '@octokit/plugin-rest-endpoint-methods/dist-types/types.js';
 
 import { logger } from '../log.ts';
 
@@ -22,9 +23,25 @@ export class GithubApi {
     this.owner = owner;
     this.repo = repo;
 
-    const token = process.env['GITHUB_API_TOKEN'];
-    if (token == null) throw new Error(`Please set up GITHUB_API_TOKEN environment variable.`);
-    this.octokit = restEndpointMethods(new Octokit({ auth: token }));
+    const appId = process.env['GITHUB_APP_ID'];
+    const privateKey = process.env['GITHUB_APP_PRIVATE_KEY'];
+    const installationId = process.env['GITHUB_APP_INSTALLATION_ID'];
+
+    const missing = [
+      appId == null ? 'GITHUB_APP_ID' : null,
+      privateKey == null ? 'GITHUB_APP_PRIVATE_KEY' : null,
+      installationId == null ? 'GITHUB_APP_INSTALLATION_ID' : null,
+    ].filter((f) => f != null);
+    if (missing.length > 0) throw new Error(`Please set up environment variables: ${missing.join(', ')}.`);
+
+    this.octokit = restEndpointMethods(
+      new Octokit({
+        authStrategy: createAppAuth,
+        // Private keys supplied through environment variables may contain newlines,
+        // which the JWT signer will not accept
+        auth: { appId, privateKey: privateKey?.replace(/\\n/g, '\n'), installationId },
+      }),
+    );
   }
 
   isOk = (s: number): boolean => s >= 200 && s <= 299;
@@ -110,7 +127,7 @@ export class GithubApi {
   /**
    * Create a file imagery config file into basemaps-config/config/imagery and commit
    */
-  async createCommit(blobs: Blob[], message: string, botEmail: string, sha: string): Promise<string> {
+  async createCommit(blobs: Blob[], message: string, sha: string): Promise<string> {
     // Create a tree which defines the folder structure
     logger.debug({ sha }, 'GitHub API: Create Tree');
     const treeRes = await this.octokit.rest.git.createTree({
@@ -129,10 +146,6 @@ export class GithubApi {
       owner: this.owner,
       repo: this.repo,
       message,
-      author: {
-        name: 'linz-li-bot',
-        email: botEmail,
-      },
       parents: [sha],
       tree: treeSha,
     });
@@ -160,9 +173,9 @@ export class GithubApi {
   async createPullRequest(
     branch: string,
     title: string,
-    botEmail: string,
     files: GithubFiles[],
     body?: string,
+    draft: boolean = false,
   ): Promise<number | null> {
     // git checkout -b
     logger.info({ branch }, 'GitHub: Get branch');
@@ -182,7 +195,7 @@ export class GithubApi {
 
     // git commit
     logger.info({ branch }, 'GitHub: Commit to Branch');
-    const commitSha = await this.createCommit(blobs, title, botEmail, sha);
+    const commitSha = await this.createCommit(blobs, title, sha);
 
     // git push
     logger.info({ branch }, 'GitHub: Push commit to Branch');
@@ -200,6 +213,7 @@ export class GithubApi {
         body,
         head: branch,
         base: 'master',
+        draft,
       })
       .catch((e) => {
         if (isGithubError(e) && e?.status === 422 && String(e.message).includes('A pull request already exists')) {

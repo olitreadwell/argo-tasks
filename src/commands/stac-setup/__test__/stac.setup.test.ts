@@ -1,13 +1,15 @@
+import { fsa, FsMemory } from '@chunkd/fs';
 import assert from 'node:assert';
 import { afterEach, before, beforeEach, describe, it } from 'node:test';
 
-import { fsa, FsMemory } from '@chunkd/fs';
-
+import { RgbaNztm2000Tiff } from '../../../__test__/tiff.util.ts';
+import { logger } from '../../../log.ts';
 import type { GeospatialDataCategory } from '../../../utils/metadata.ts';
 import { MeterAsString } from '../../common.ts';
+import { formatBucketName } from '../../generate-path/path.generate.ts';
 import type { SlugMetadata } from '../stac.setup.ts';
 import { commandStacSetup, formatDate, slugFromMetadata } from '../stac.setup.ts';
-import { SampleCollection } from './stac.setup.data.ts';
+import { HawkesBayResupplyCollection, RgbnirCollection, SampleCollection } from './stac.setup.data.ts';
 
 describe('stac-setup', () => {
   const mem = new FsMemory();
@@ -19,6 +21,10 @@ describe('stac-setup', () => {
 
   beforeEach(async () => {
     await fsa.write(collectionLocation, JSON.stringify(SampleCollection));
+    // add an item so stac-setup can read the first item of a collection
+    const item = { assets: { visual: { href: './BA34_1000_3040.tiff' } } };
+    await fsa.write(fsa.toUrl('memory:///BA34_1000_3040.json'), JSON.stringify(item));
+    await fsa.write(fsa.toUrl('memory:///BA34_1000_3040.tiff'), RgbaNztm2000Tiff);
   });
 
   afterEach(() => {
@@ -36,9 +42,12 @@ describe('stac-setup', () => {
     odrUrl: undefined,
     output: fsa.toUrl('memory:///tmp/stac-setup/'),
     gsd: '1',
+    dataType: 'uint8',
     region: 'gisborne',
     geographicDescription: 'Wairoa',
     geospatialCategory: 'dem',
+    targetBucketName: formatBucketName('test-bucket'),
+    targetEpsg: 2193,
   };
 
   it('should retrieve setup from collection', async () => {
@@ -55,7 +64,7 @@ describe('stac-setup', () => {
     await commandStacSetup.handler(baseArgs);
 
     const files = await fsa.toArray(fsa.list(fsa.toUrl('memory:///tmp/stac-setup/')));
-    files.sort();
+    files.sort((a, b) => a.href.localeCompare(b.href));
     assert.deepStrictEqual(files, [
       fsa.toUrl('memory:///tmp/stac-setup/collection-id'),
       fsa.toUrl('memory:///tmp/stac-setup/linz-slug'),
@@ -66,7 +75,9 @@ describe('stac-setup', () => {
     assert.strictEqual(collectionId.toString(), '01HGF4RAQSM53Z26Y7C27T1GMB');
   });
 
-  it('should retrieve setup from args', async () => {
+  it('should retrieve setup from args', async (t) => {
+    // Avoid checking real S3 during unit tests
+    t.mock.method(fsa, 'exists', () => Promise.resolve(false));
     const baseArgs = {
       ...BaseArgs,
       odrUrl: undefined,
@@ -80,7 +91,7 @@ describe('stac-setup', () => {
     await commandStacSetup.handler(baseArgs);
 
     const files = await fsa.toArray(fsa.list(fsa.toUrl('memory:///tmp/stac-setup/')));
-    files.sort();
+    files.sort((a, b) => a.href.localeCompare(b.href));
     assert.deepStrictEqual(files, [
       fsa.toUrl('memory:///tmp/stac-setup/collection-id'),
       fsa.toUrl('memory:///tmp/stac-setup/linz-slug'),
@@ -91,7 +102,10 @@ describe('stac-setup', () => {
     assert.notStrictEqual(collectionId.toString(), '01HGF4RAQSM53Z26Y7C27T1GMB');
   });
 
-  it('should not include the date in the slug', async () => {
+  it('should not include the date in the slug', async (t) => {
+    // Simulate no existing collection at the generated ODR path
+    t.mock.method(fsa, 'exists', () => Promise.resolve(false));
+
     const baseArgs = {
       ...BaseArgs,
       odrUrl: undefined,
@@ -102,10 +116,11 @@ describe('stac-setup', () => {
       geographicDescription: '',
       geospatialCategory: 'dem',
     } as const;
+
     await commandStacSetup.handler(baseArgs);
 
     const files = await fsa.toArray(fsa.list(fsa.toUrl('memory:///tmp/stac-setup/')));
-    files.sort();
+    files.sort((a, b) => a.href.localeCompare(b.href));
     assert.deepStrictEqual(files, [
       fsa.toUrl('memory:///tmp/stac-setup/collection-id'),
       fsa.toUrl('memory:///tmp/stac-setup/linz-slug'),
@@ -114,7 +129,30 @@ describe('stac-setup', () => {
     assert.strictEqual(slug.toString(), 'new-zealand');
   });
 
-  it('should generate a slug with a survey id', async () => {
+  it('should throw an error when collection.json already exists', async (t) => {
+    // Simulate existing collection at the generated ODR path
+    t.mock.method(fsa, 'exists', () => Promise.resolve(true));
+
+    const baseArgs = {
+      ...BaseArgs,
+      startYear: '1982',
+      endYear: '1983',
+      gsd: '0.375',
+      region: 'chatham-islands',
+      surveyId: 'SN8066',
+      geographicDescription: 'Chatham Islands',
+      geospatialCategory: 'scanned-aerial-photos',
+    } as const;
+
+    await assert.rejects(commandStacSetup.handler(baseArgs), {
+      message: `An existing collection was found at s3://test-bucket/chatham-islands/chatham-islands_sn8066_1982-1983_0.375m/rgb/${baseArgs.targetEpsg}/collection.json. To overwrite or update the existing collection, supply its ODR URL using odr_url.`,
+    });
+  });
+
+  it('should generate a slug with a survey id', async (t) => {
+    // Simulate no existing collection at the generated ODR path
+    t.mock.method(fsa, 'exists', () => Promise.resolve(false));
+
     const baseArgs = {
       ...BaseArgs,
       startYear: '1982',
@@ -161,6 +199,111 @@ describe('stac-setup', () => {
       { message: 'GSD at ODR URL [0.3] does not match new TIFF GSD [1]' },
     );
   });
+
+  it('should pass when data type matches collection', async () => {
+    await commandStacSetup.handler({
+      ...BaseArgs,
+      odrUrl: collectionLocation,
+      gsd: '0.3',
+      dataType: 'uint8',
+    });
+
+    const collectionId = await fsa.read(fsa.toUrl('memory:///tmp/stac-setup/collection-id'));
+    assert.strictEqual(collectionId.toString(), '01HGF4RAQSM53Z26Y7C27T1GMB');
+  });
+
+  it('should warn and allow uint16 resupply for RGB collections with uint8 ODR data', async (t) => {
+    await fsa.write(collectionLocation, JSON.stringify(HawkesBayResupplyCollection));
+
+    const warnStub = t.mock.method(logger, 'warn');
+
+    await commandStacSetup.handler({
+      ...BaseArgs,
+      odrUrl: collectionLocation,
+      gsd: '0.3',
+      dataType: 'uint16',
+    });
+
+    assert.equal(warnStub.mock.callCount(), 1);
+    const opts = warnStub.mock.calls[0]?.arguments[0] as Record<string, string>;
+    assert.equal(opts['sourceDataType'], 'uint16');
+    assert.equal(opts['geospatialCategory'], 'urban-aerial-photos');
+    assert.equal(
+      opts['reason'],
+      'RGB imagery is standardised to 8-bit WebP, so a uint16 resupply of a uint8 ODR collection is allowed',
+    );
+
+    const files = await fsa.toArray(fsa.list(fsa.toUrl('memory:///tmp/stac-setup/')));
+    files.sort((a, b) => a.href.localeCompare(b.href));
+    assert.deepStrictEqual(files, [
+      fsa.toUrl('memory:///tmp/stac-setup/collection-id'),
+      fsa.toUrl('memory:///tmp/stac-setup/linz-slug'),
+    ]);
+
+    const collectionId = await fsa.read(fsa.toUrl('memory:///tmp/stac-setup/collection-id'));
+    assert.strictEqual(collectionId.toString(), HawkesBayResupplyCollection.id);
+
+    const slug = await fsa.read(fsa.toUrl('memory:///tmp/stac-setup/linz-slug'));
+    assert.strictEqual(slug.toString(), HawkesBayResupplyCollection['linz:slug']);
+  });
+
+  it('should reject 16-bit resupply of 8-bit RGBNIR ODR dataset', async () => {
+    await fsa.write(collectionLocation, JSON.stringify(RgbnirCollection));
+
+    await assert.rejects(
+      commandStacSetup.handler({
+        ...BaseArgs,
+        odrUrl: collectionLocation,
+        gsd: '0.3',
+        dataType: 'uint16',
+      }),
+      { message: 'Data type at ODR URL [uint8] does not match new TIFF data type [uint16]' },
+    );
+  });
+
+  it('should reject 8-bit resupply of 16-bit RGBNIR ODR dataset', async () => {
+    const rgbnirUint16 = { ...RgbnirCollection, data_type: 'uint16' };
+    await fsa.write(collectionLocation, JSON.stringify(rgbnirUint16));
+
+    await assert.rejects(
+      commandStacSetup.handler({
+        ...BaseArgs,
+        odrUrl: collectionLocation,
+        gsd: '0.3',
+        dataType: 'uint8',
+      }),
+      { message: 'Data type at ODR URL [uint16] does not match new TIFF data type [uint8]' },
+    );
+  });
+
+  it('should pass when uint16 data type matches uint16 collection', async () => {
+    const rgbnirUint16 = { ...RgbnirCollection, data_type: 'uint16' };
+    await fsa.write(collectionLocation, JSON.stringify(rgbnirUint16));
+
+    await commandStacSetup.handler({
+      ...BaseArgs,
+      odrUrl: collectionLocation,
+      gsd: '0.3',
+      dataType: 'uint16',
+    });
+
+    const collectionId = await fsa.read(fsa.toUrl('memory:///tmp/stac-setup/collection-id'));
+    assert.strictEqual(collectionId.toString(), rgbnirUint16.id);
+  });
+
+  it('should reject 8-bit resupply of 16-bit RGB ODR dataset', async () => {
+    await fsa.write(collectionLocation, JSON.stringify({ ...SampleCollection, data_type: 'uint16' }));
+
+    await assert.rejects(
+      commandStacSetup.handler({
+        ...BaseArgs,
+        odrUrl: collectionLocation,
+        gsd: '0.3',
+        dataType: 'uint8',
+      }),
+      { message: 'Data type at ODR URL [uint16] does not match new TIFF data type [uint8]' },
+    );
+  });
 });
 
 describe('slugFromMetadata', () => {
@@ -174,6 +317,7 @@ describe('slugFromMetadata', () => {
     };
     assert.equal(slugFromMetadata(metadata), 'napier_2017-2018_0.05m');
   });
+
   it('Should match - rural with geographic description', () => {
     const metadata: SlugMetadata = {
       geospatialCategory: 'rural-aerial-photos',
@@ -268,10 +412,10 @@ describe('slugFromMetadata', () => {
 });
 
 describe('formatDate', () => {
-  it('Should return date as single year', async () => {
+  it('Should return date as single year', () => {
     assert.equal(formatDate('2023', '2023'), '2023');
   });
-  it('Should return date as two years', async () => {
+  it('Should return date as two years', () => {
     assert.equal(formatDate('2023', '2024'), '2023-2024');
   });
   it('Should only return a date if both are set', () => {

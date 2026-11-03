@@ -1,37 +1,90 @@
 version: 2
+
 updates:
-- package-ecosystem: "docker"
-  directory: "/.github/workflows"
-  schedule:
-    interval: daily
-  cooldown:
-    default-days: 15
-- package-ecosystem: "github-actions"
-  directory: "/"
-  schedule:
-    interval: daily
-  cooldown:
-    default-days: 15
-- package-ecosystem: npm
-  directory: "/"
-  schedule:
-    interval: daily
-  cooldown:
-    default-days: 15
-  open-pull-requests-limit: 10
-  groups:
-    basemaps:
-      patterns:
-        - "@basemaps/*"
-    aws:
-      patterns:
-        - "@aws-sdk/*"
-    chunkd:
-      patterns:
-        - "@cogeotiff/*"
-        - "@chunkd/*"
-  ignore:
-    - dependency-name: "@aws-sdk/*"
-      update-types: ["version-update:semver-patch"]
-    - dependency-name: "@types/node"
-      update-types: ["version-update:semver-patch"]
+  - package-ecosystem: docker
+    directories:
+      - /
+    open-pull-requests-limit: 5
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:30'
+      timezone: Pacific/Auckland
+    cooldown:
+      default-days: 15
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories:
+      - /.github/workflows
+    open-pull-requests-limit: 5
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:30'
+      timezone: Pacific/Auckland
+    cooldown:
+      default-days: 15
+    commit-message:
+      prefix: build(deps)
+
+  - package-ecosystem: github-actions
+    directories:
+      - /
+    open-pull-requests-limit: 5
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:30'
+      timezone: Pacific/Auckland
+    cooldown:
+      default-days: 15
+    commit-message:
+      prefix: build(deps)
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories:
+      - /
+    open-pull-requests-limit: 5
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:30'
+      timezone: Pacific/Auckland
+    cooldown:
+      default-days: 15
+    commit-message:
+      prefix: build(deps)
+    groups:
+      basemaps:
+        patterns:
+          - '@basemaps/*'
+      octokit:
+        patterns:
+          - '@octokit/*'
+      aws:
+        patterns:
+          - '@aws-sdk/*'
+      aws-cdk:
+        patterns:
+          - 'aws-cdk'
+          - 'aws-cdk-lib'
+          - 'constructs'
+      chunkd:
+        patterns:
+          - '@cogeotiff/*'
+          - '@chunkd/*'
+      npm-minor-and-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [minor, patch]

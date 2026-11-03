@@ -32,8 +32,6 @@ lds-fetch-layer  --target ./output 51002 51000
 
 Generate target path for ODR buckets using collection metadata.
 
-The date can be omitted from the survey name (example: `s3://nz-elevation/new-zealand/new-zealand/dem_1m/2193/`) by passing the `--no-date-in-survey-path` flag.
-
 For imagery naming conventions see: https://github.com/linz/imagery/blob/master/docs/naming.md
 For elevation naming conventions see: https://github.com/linz/elevation/blob/master/docs/naming.md
 
@@ -75,7 +73,7 @@ list s3://linz-imagery/sample --include ".*.tiff$"  --exclude "BG33.tiff$" --out
 
 ### `pretty-print`
 
-Format all JSON files within a directory using `prettier`.
+Format all JSON files within a directory using `oxfmt`.
 
 #### Example
 
@@ -258,11 +256,11 @@ stac validate --checksum-assets --checksum-links --recursive s3://linz-imagery-s
 
 Map input TIFF files to output tiles based on their location. Validate their alignment to the tile grid and output retiling information.
 
-Outputs files for visualisation of the tiles and a list of output tiles with their input TIFF files for [topo-imagery](https://github.com/linz/topo-imagery/pkgs/container/topo-imagery) to use for creating the tiles with GDAL.
+Outputs files for visualisation of the tiles and a list of output tiles with their input TIFF files for [geoprocessor/raster](https://github.com/linz/geoprocessor/pkgs/container/geoprocessor%2Fraster) to use for creating the tiles with GDAL.
 
 - `input.geojson` GeoJSON file containing the bounding boxes of the source files. Example: [input.geojson](docs/input.geojson)
 - `output.geojson` GeoJSON file containing the bounding boxes of the requested target files. Example: [output.geojson](docs/output.geojson)
-- `file-list.json` a list of source and target files to be used as an input for `topo-imagery`. Example: [file-list.json](docs/file-list.json)
+- `file-list.json` a list of source and target files to be used as an input for `geoprocessor/raster`. Example: [file-list.json](docs/file-list.json)
 
 #### Example
 
@@ -292,9 +290,9 @@ Add --vector flag to import new layer into vector map.
 
 Get a list of STAC items from source datasets that have changed or been added to the source compared to the optional target collection, based on existing hashes in linked STAC documents. Note: If a target collection has been provided, its items links must be resolvable. If no target is specified, all items will be considered updated/new.
 
-Outputs a `file-list.json` file for [topo-imagery](https://github.com/linz/topo-imagery/pkgs/container/topo-imagery) to use for generating hillshades (or retiling with GDAL).
+Outputs a `file-list.json` file for [geoprocessor/raster](https://github.com/linz/geoprocessor/pkgs/container/geoprocessor%2Fraster) to use for generating hillshades (or retiling with GDAL).
 
-- `file-list.json` a list of source and target files to be used as an input for `topo-imagery`. Example: [file-list.json](docs/file-list.json)
+- `file-list.json` a list of source and target files to be used as an input for `geoprocessor/raster`. Example: [file-list.json](docs/file-list.json)
 
 `--target-collection`
 Target collection.json file that needs to be updated. If not provided, all items will be considered updated/new.

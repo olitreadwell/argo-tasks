@@ -1,63 +1,68 @@
 {
   "name": "@linzjs/argo-tasks",
+  "version": "8.1.4",
   "private": true,
-  "version": "5.6.0",
-  "main": "build/src/index.js",
-  "types": "build/src/index.d.ts",
-  "repository": "git@github.com:linz/argo-tasks.git",
   "license": "MIT",
   "author": {
     "name": "Land Information New Zealand",
     "url": "https://linz.govt.nz",
     "organization": true
   },
-  "devDependencies": {
-    "@chunkd/source-memory": "^11.0.2",
-    "@linzjs/style": "^5.4.0",
-    "@types/node": "^24.2.0",
-    "@types/prettier": "^3.0.0",
-    "stac-ts": "^1.0.4"
+  "repository": "git@github.com:linz/argo-tasks.git",
+  "files": [
+    "src/"
+  ],
+  "type": "module",
+  "main": "build/src/index.js",
+  "types": "build/src/index.d.ts",
+  "publishConfig": {
+    "access": "restricted"
   },
   "scripts": {
     "build": "tsc",
     "docs": "node src/readme/readme.generate.ts",
-    "lint": "npx eslint . --ignore-path .gitignore",
+    "lint": "npm run lint:fmt && tsc && npm run lint:oxlint",
+    "lint:oxlint": "oxlint --deny-warnings",
+    "lint:fmt": "oxfmt --check .",
+    "lint:fix": "oxlint --fix && oxfmt --write .",
+    "format": "oxfmt --write .",
     "test": "node --test 'src/**/*.test.ts'"
   },
-  "publishConfig": {
-    "access": "restricted"
-  },
-  "type": "module",
-  "engines": {
-    "node": "^24.5.0"
-  },
-  "files": [
-    "src/"
-  ],
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.873.0",
-    "@aws-sdk/credential-providers": "^3.438.0",
-    "@aws-sdk/lib-storage": "^3.440.0",
-    "@basemaps/config": "^7.7.0",
-    "@basemaps/geo": "^7.5.0",
-    "@chunkd/fs": "^11.3.0",
-    "@chunkd/fs-aws": "^11.4.0",
-    "@chunkd/source-file": "^11.0.1",
-    "@cogeotiff/core": "^9.1.2",
-    "@linzjs/geojson": "^7.10.0",
-    "@octokit/core": "^5.0.0",
-    "@octokit/plugin-rest-endpoint-methods": "^10.1.1",
-    "@turf/buffer": "^7.1.0",
+    "@aws-sdk/client-s3": "^3.1149.0",
+    "@aws-sdk/credential-providers": "^3.1149.0",
+    "@aws-sdk/lib-storage": "^3.1149.0",
+    "@basemaps/config": "^8.13.2",
+    "@basemaps/geo": "^8.9.1",
+    "@chunkd/fs": "^11.5.3",
+    "@chunkd/fs-aws": "^11.6.3",
+    "@chunkd/source-file": "^11.2.2",
+    "@cogeotiff/core": "^9.5.0",
+    "@linzjs/geojson": "^8.0.0",
+    "@octokit/auth-app": "^8.3.1",
+    "@octokit/core": "^7.0.8",
+    "@octokit/plugin-rest-endpoint-methods": "^18.0.0",
+    "@turf/buffer": "^7.4.0",
     "@wtrpc/core": "^1.1.0",
     "ajv": "^8.17.1",
-    "ajv-formats": "^2.1.1",
-    "cmd-ts": "^0.13.0",
-    "flatgeobuf": "^3.23.1",
-    "p-limit": "^5.0.0",
-    "pino": "^8.17.0",
-    "prettier": "^3.3.3",
+    "ajv-formats": "^3.0.1",
+    "cmd-ts": "^0.15.0",
+    "flatgeobuf": "^4.6.0",
+    "oxfmt": "^0.73.0",
+    "p-limit": "^7.3.3",
+    "pino": "^10.4.0",
     "pretty-json-log": "^1.4.0",
-    "ulid": "^2.3.0",
-    "zod": "^3.22.4"
+    "ulid": "^3.0.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@chunkd/source-memory": "^11.2.2",
+    "@linzjs/style": "^6.1.1",
+    "@types/node": "~24.5.0",
+    "stac-ts": "^1.0.4",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": "^24.22.1"
   }
 }

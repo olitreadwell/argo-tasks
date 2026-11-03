@@ -1,7 +1,7 @@
 import { Bounds, EpsgCode, Projection } from '@basemaps/geo';
 import { fsa } from '@chunkd/fs';
 import type { Size } from '@cogeotiff/core';
-import { Tiff, TiffTag } from '@cogeotiff/core';
+import { Tiff } from '@cogeotiff/core';
 import type { BBox } from '@linzjs/geojson';
 import type { Type } from 'cmd-ts';
 import { boolean, command, flag, number, option, optional, restPositionals, string } from 'cmd-ts';
@@ -31,7 +31,7 @@ export interface TiffLocation {
   /** Output tile name */
   tileNames: string[];
   /**
-   * List of bands inside the tiff in the format `uint8` `uint16`
+   * List of bands inside the tiff in the format `uint8',`uint16`, `uint32`
    *
    * @see {@link extractBandInformation} for more information on bad types
    */
@@ -49,6 +49,8 @@ interface TiffsMetadata {
   canGetResolution: boolean;
   /** Number of TIFF files processed */
   tiffCount: number;
+  /** Set of unique data types found in the TIFF files */
+  dataTypes: Set<string>;
 }
 
 export type CommandTileIndexValidateArgs = CommandArguments<typeof commandTileIndexValidate>;
@@ -60,6 +62,7 @@ export const GridSizeFromString: Type<string, GridSize | 'auto'> = {
    * @param value The input string.
    * @returns The corresponding GridSize or 'auto'.
    */
+  // oxlint-disable-next-line typescript/require-await -- throw must become a rejection
   async from(value) {
     if (value === 'auto') return value;
     const gridSize = Number(value) as GridSize;
@@ -77,6 +80,7 @@ export const TargetEpsgFromString: Type<string, number> = {
    * @param value The input string.
    * @returns The corresponding EPSG code.
    */
+  // oxlint-disable-next-line typescript/require-await -- throw must become a rejection
   async from(value) {
     const epsg = Number(value);
     if (MapSheetRegistry[epsg] == null) {
@@ -131,7 +135,8 @@ export const commandTileIndexValidate = command({
     location: restPositionals({
       type: UrlFolderList,
       displayName: 'location',
-      description: 'Location of the source files. Accepts multiple source paths',
+      description:
+        'Location of the source files. Accepts multiple source paths. Later locations take priority where folders overlap.',
     }),
     concurrency: option({
       type: number,
@@ -243,6 +248,7 @@ export const commandTileIndexValidate = command({
         targetEpsg,
         args.includeDerived,
         String([...tiffsMetadata.roundedGsds][0]),
+        String([...tiffsMetadata.dataTypes][0]),
       );
     }
 
@@ -256,6 +262,8 @@ export const TiffLoader = {
   /**
    * Concurrently load a collection of TIFF files in the locations provided.
    *
+   * Tiffs are ordered by location, then listing. A file listed by overlapping locations is loaded once and belongs to the most specific one.
+   *
    * @param locations list of locations to find tiffs in.
    * @param args filter the tiffs
    * @returns Initialized tiff
@@ -263,12 +271,16 @@ export const TiffLoader = {
   async load(locations: URL[], q: ConcurrentQueue, args?: FileFilter): Promise<Tiff[]> {
     const filterArgs = { ...args, sizeMin: 0 };
     const hosts = new Set<string>();
+    /** File href to its listing position and most specific location's href length */
+    const listingOrder = new Map<string, { position: number; specificity: number }>();
 
     const totalTime = performance.now();
     let progressTime = totalTime;
 
     /** Number of tiff files processed */
     let tiffLoaded = 0;
+    /** Number of tiff files listed */
+    let tiffListed = 0;
     /** Number of tiffs that filed to load */
     let failedCount = 0;
     const output: Tiff[] = [];
@@ -277,6 +289,13 @@ export const TiffLoader = {
     for (const loc of locations) {
       for await (const file of asyncFilter(fsa.details(loc), filterArgs)) {
         if (!isTiff(file.url)) continue;
+        const existing = listingOrder.get(file.url.href);
+        // Deepest location wins, the later one on ties
+        if (existing == null || loc.href.length >= existing.specificity) {
+          listingOrder.set(file.url.href, { position: tiffListed, specificity: loc.href.length });
+        }
+        tiffListed++;
+        if (existing != null) continue;
         // ensure credentials have been loaded
         if (!hosts.has(file.url.hostname)) {
           await fsa.head(file.url);
@@ -312,6 +331,9 @@ export const TiffLoader = {
       }
     }
 
+    const duplicates = tiffListed - listingOrder.size;
+    if (duplicates > 0) logger.warn({ duplicates }, 'Tiff:Load:Duplicates');
+
     await q.join();
 
     if (failedCount > 0) {
@@ -320,6 +342,14 @@ export const TiffLoader = {
     }
 
     if (output.length === 0) throw new Error('No Files found');
+
+    // Restore listing order, as tiffs load concurrently
+    output.sort((a, b) => {
+      const orderA = listingOrder.get(a.source.url.href);
+      const orderB = listingOrder.get(b.source.url.href);
+      if (orderA == null || orderB == null) throw new Error('Tiff missing from listing');
+      return orderA.position - orderB.position;
+    });
 
     logger.info({ count: output.length, duration: performance.now() - totalTime }, 'Tiffs:Loaded');
     return output;
@@ -350,6 +380,8 @@ async function getTiffsMetadata(tiffs: Tiff[], locations: URL[]): Promise<TiffsM
   const projections = new Set<number>();
   const gsds = new Set<number>();
   const roundedGsds = new Set<string>();
+  const dataTypes = new Set<string>();
+  const failedDataTypeSources: string[] = [];
   let canGetResolution = true;
 
   await Promise.all(
@@ -358,6 +390,18 @@ async function getTiffsMetadata(tiffs: Tiff[], locations: URL[]): Promise<TiffsM
         const image = tiff.images[0];
         if (image) {
           if (image.epsg != null) projections.add(image.epsg);
+
+          const bands = await extractBandInformation(tiff).catch((e: unknown) => {
+            logger.error(
+              { source: protocolAwareString(tiff.source.url), err: e },
+              'TileIndex:ExtractBandInformation:Failed',
+            );
+            failedDataTypeSources.push(protocolAwareString(tiff.source.url));
+            return null;
+          });
+          if (bands != null && bands[0] != null) {
+            dataTypes.add(bands[0]);
+          }
         }
         const gsd = await findResolution(tiff);
         gsds.add(gsd);
@@ -382,12 +426,24 @@ async function getTiffsMetadata(tiffs: Tiff[], locations: URL[]): Promise<TiffsM
   } else if (gsds.size > 1) {
     logger.info({ gsds: [...gsds], roundedGsds: [...roundedGsds] }, 'TileIndex:InconsistentGSDs:RoundedToMatch');
   }
+
+  if (dataTypes.size === 0) {
+    logger.error({ sources: failedDataTypeSources }, 'TileIndex:NoDataTypesFound');
+    throw new Error(`No data types found in the TIFFs: ${failedDataTypeSources.join(', ')}`);
+  }
+
+  if (dataTypes.size > 1) {
+    logger.error({ dataTypes: [...dataTypes] }, 'TileIndex:InconsistentDataTypes:Failed');
+    throw new Error(`Inconsistent data types found: ${[...dataTypes].join(', ')}`);
+  }
+
   return {
     projections,
     gsds,
     roundedGsds,
     canGetResolution,
     tiffCount: tiffs.length,
+    dataTypes,
   };
 }
 
@@ -406,6 +462,7 @@ async function generateOutputFiles(
   targetEpsg: number,
   includeDerived: boolean,
   gsd: string,
+  dataType: string,
 ): Promise<void> {
   const mapSheet = getMapSheet(targetEpsg);
   const targetProjection = Projection.get(targetEpsg);
@@ -438,6 +495,7 @@ async function generateOutputFiles(
   const outputGeoJsonFileName = fsa.toUrl('/tmp/tile-index-validate/output.geojson');
   const fileListFileName = fsa.toUrl('/tmp/tile-index-validate/file-list.json');
   const gsdFileName = fsa.toUrl('/tmp/tile-index-validate/gsd');
+  const dataTypeFileName = fsa.toUrl('/tmp/tile-index-validate/data-type');
 
   await fsa.write(inputGeoJsonFileName, JSON.stringify(inputGeoJson));
   logger.info({ path: protocolAwareString(inputGeoJsonFileName) }, 'Write:InputGeoJson');
@@ -451,6 +509,9 @@ async function generateOutputFiles(
 
   await fsa.write(gsdFileName, gsd);
   logger.info({ path: protocolAwareString(gsdFileName), gsd }, 'Write:GSD');
+
+  await fsa.write(dataTypeFileName, dataType);
+  logger.info({ path: protocolAwareString(dataTypeFileName), dataType }, 'Write:DataType');
 }
 
 /**
@@ -494,8 +555,17 @@ export function determineGridSizeFromGSDPreset(gsd: number, preset: string): Gri
   throw new Error(`Unknown preset: ${preset}`);
 }
 
+function allowedDataTypesForPreset(preset: string): Set<string> | null {
+  if (preset === 'webp' || preset === 'rgbnir_zstd') return new Set(['uint8', 'uint16']);
+  if (preset === 'lzw') return new Set(['uint8']);
+  if (preset === 'dem_lerc') return new Set(['float32']);
+  return null;
+}
+
 /**
- * Validate the tiffs against a validation preset
+ * Validate each tiff against a validation preset
+ *
+ * Consistency of the data type across tiffs is checked by {@link getTiffsMetadata}
  *
  * @param preset preset to validate against
  * @param tiffs tiffs to validate.
@@ -503,18 +573,19 @@ export function determineGridSizeFromGSDPreset(gsd: number, preset: string): Gri
 export async function validatePreset(preset: string, tiffs: Tiff[]): Promise<void> {
   let rejected = false;
 
-  if (preset === 'webp' || preset === 'rgbnir_zstd') {
-    const promises = tiffs.map((f) => {
-      return validate8BitsTiff(f).catch((err) => {
-        logger.fatal(
-          { reason: String(err), source: protocolAwareString(f.source.url), preset },
-          'Tiff:ValidatePreset:failed',
-        );
-        rejected = true;
-      });
+  const allowedDataTypes = allowedDataTypesForPreset(preset);
+  if (allowedDataTypes == null) return;
+
+  const promises = tiffs.map(async (t) => {
+    await validateTiffDataType(t, allowedDataTypes).catch((err) => {
+      logger.fatal(
+        { reason: String(err), source: protocolAwareString(t.source.url), preset },
+        'Tiff:ValidatePreset:failed',
+      );
+      rejected = true;
     });
-    await Promise.allSettled(promises);
-  }
+  });
+  await Promise.allSettled(promises);
 
   if (rejected) throw new Error(`Tiff preset:"${preset}" validation failed`);
 }
@@ -636,6 +707,7 @@ export async function extractTiffLocations(
           source: tiff.source.url,
           tileNames: covering,
           epsg: tiff.images[0]?.epsg,
+          //FIXME: extractBandInformation now runs in getTiffsMetadata, so it runs twice.
           bands: await extractBandInformation(tiff),
         };
       } catch (e) {
@@ -715,22 +787,30 @@ export function getTileName(x: number, y: number, gridSize: GridSize, mapSheet: 
 }
 
 /**
- * Validate if a TIFF contains only 8 bits bands.
+ * Ensure every band of the tiff has the same data type and that it is one of the allowed data types
+ * (e.g. `uint8` or `uint16` for the webp preset).
  *
  * @param tiff
+ * @param allowedDataTypes data types in the format of {@link extractBandInformation}, e.g. `uint8`, `float32`
+ * @returns the data type of the tiff
  */
-export async function validate8BitsTiff(tiff: Tiff): Promise<void> {
-  const baseImage = tiff.images[0];
-  if (baseImage === undefined) throw new Error(`Can't get base image for ${protocolAwareString(tiff.source.url)}`);
-
-  const bitsPerSample = await baseImage.fetch(TiffTag.BitsPerSample);
-  if (bitsPerSample == null) {
+export async function validateTiffDataType(tiff: Tiff, allowedDataTypes: Set<string>): Promise<string> {
+  const bands = await extractBandInformation(tiff);
+  const dataType = bands[0];
+  if (dataType == null) {
     throw new Error(`Failed to extract band information from ${protocolAwareString(tiff.source.url)}`);
   }
 
-  if (!bitsPerSample.every((currentNumberBits) => currentNumberBits === 8)) {
-    throw new Error(`${protocolAwareString(tiff.source.url)} is not a 8 bits TIFF`);
+  if (bands.some((band) => band !== dataType)) {
+    throw new Error(`${protocolAwareString(tiff.source.url)} Inconsistent data type across bands: ${bands.join(', ')}`);
   }
+
+  if (!allowedDataTypes.has(dataType)) {
+    throw new Error(
+      `${protocolAwareString(tiff.source.url)} has unsupported data type: ${dataType}. Expected: ${[...allowedDataTypes].join(', ')}`,
+    );
+  }
+  return dataType;
 }
 
 /**

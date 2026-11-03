@@ -1,13 +1,15 @@
-import assert from 'node:assert';
-import { before, beforeEach, describe, it } from 'node:test';
-
 import { Projection } from '@basemaps/geo';
 import { fsa, FsMemory } from '@chunkd/fs';
+import type { Source } from '@cogeotiff/core';
+import { SampleFormat, Tiff, TiffTag } from '@cogeotiff/core';
 import type { BBox } from '@linzjs/geojson';
+import assert from 'node:assert';
+import { before, beforeEach, describe, it } from 'node:test';
 import { pathToFileURL } from 'url';
 
 import { logger } from '../../../log.ts';
 import { MapSheetData } from '../../../utils/__test__/mapsheet.data.ts';
+import { ConcurrentQueue } from '../../../utils/concurrent.queue.ts';
 import type { FileListEntryClass } from '../../../utils/filelist.ts';
 import type { GridSize } from '../../../utils/mapsheet.ts';
 import { ChathamMapSheet, MapSheet } from '../../../utils/mapsheet.ts';
@@ -23,12 +25,10 @@ import {
   isTiff,
   reprojectIfNeeded,
   TiffLoader,
-  validate8BitsTiff,
   validatePreset,
+  validateTiffDataType,
 } from '../tileindex.validate.ts';
 import { FakeCogTiff } from './tileindex.validate.data.ts';
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 function convertTileName(fileName: string, gridSize: GridSize): string | null {
   const mapTileIndex = MapSheet.getMapTileIndex(fileName);
@@ -249,6 +249,90 @@ describe('validate', () => {
     assert.equal(stub.mock.callCount(), 1);
   });
 
+  const root = 'memory://bucket/';
+  // In S3 listing order, each folder has a unique file sorting before its sub-folders and an x.tiff sorting after them
+  const files = ['a/a.tiff', 'a/b/b.tiff', 'a/b/c/c.tiff', 'a/b/c/x.tiff', 'a/b/x.tiff', 'a/x.tiff'];
+  const cases = [
+    {
+      folders: ['a/', 'a/b/', 'a/b/c/'],
+      expected: ['a/a.tiff', 'a/x.tiff', 'a/b/b.tiff', 'a/b/x.tiff', 'a/b/c/c.tiff', 'a/b/c/x.tiff'],
+    },
+    {
+      folders: ['a/', 'a/b/c/', 'a/b/'],
+      expected: ['a/a.tiff', 'a/x.tiff', 'a/b/c/c.tiff', 'a/b/c/x.tiff', 'a/b/b.tiff', 'a/b/x.tiff'],
+    },
+    {
+      folders: ['a/b/', 'a/', 'a/b/c/'],
+      expected: ['a/b/b.tiff', 'a/b/x.tiff', 'a/a.tiff', 'a/x.tiff', 'a/b/c/c.tiff', 'a/b/c/x.tiff'],
+    },
+    {
+      folders: ['a/b/', 'a/b/c/', 'a/'],
+      expected: ['a/b/b.tiff', 'a/b/x.tiff', 'a/b/c/c.tiff', 'a/b/c/x.tiff', 'a/a.tiff', 'a/x.tiff'],
+    },
+    {
+      folders: ['a/b/c/', 'a/', 'a/b/'],
+      expected: ['a/b/c/c.tiff', 'a/b/c/x.tiff', 'a/a.tiff', 'a/x.tiff', 'a/b/b.tiff', 'a/b/x.tiff'],
+    },
+    {
+      folders: ['a/b/c/', 'a/b/', 'a/'],
+      expected: ['a/b/c/c.tiff', 'a/b/c/x.tiff', 'a/b/b.tiff', 'a/b/x.tiff', 'a/a.tiff', 'a/x.tiff'],
+    },
+    {
+      folders: ['a/b/', 'a/', 'a/b/'],
+      expected: ['a/a.tiff', 'a/x.tiff', 'a/b/b.tiff', 'a/b/c/c.tiff', 'a/b/c/x.tiff', 'a/b/x.tiff'],
+    },
+  ];
+  for (const { folders, expected } of cases) {
+    it(`should load ${folders.join(';')} with each file once, in order of its most specific folder`, async (t) => {
+      for (const file of files) await fsa.write(fsa.toUrl(root + file), Buffer.alloc(0));
+      // Stub loading so files earlier in the listing finish last
+      t.mock.method(Tiff, 'create', async (source: Source) => {
+        const index = files.indexOf(source.url.href.replace(root, ''));
+        await new Promise((r) => setTimeout(r, (files.length - index) * 5));
+        return { source } as Tiff;
+      });
+
+      const tiffs = await TiffLoader.load(
+        folders.map((folder) => fsa.toUrl(root + folder)),
+        new ConcurrentQueue(files.length),
+      );
+
+      assert.deepEqual(
+        tiffs.map((tiff) => tiff.source.url.href.replace(root, '')),
+        expected,
+      );
+    });
+  }
+
+  for (const { folders, expected } of [
+    {
+      folders: ['delivery/', 'delivery/add/'],
+      expected: ['delivery/BG35_1000_4829.tiff', 'delivery/add/BG35_1000_4829.tiff'],
+    },
+    {
+      folders: ['delivery/add/', 'delivery/'],
+      expected: ['delivery/add/BG35_1000_4829.tiff', 'delivery/BG35_1000_4829.tiff'],
+    },
+  ]) {
+    it(`should write ${folders.join(';')} inputs to file-list.json once each, in order of their most specific folder`, async () => {
+      // Both orders list the same files, so only the location order decides the file-list.json inputs
+      const tiffBytes = await fsa.read(pathToFileURL('./src/commands/tileindex-validate/__test__/data/8b.tiff'));
+      for (const file of ['delivery/BG35_1000_4829.tiff', 'delivery/add/BG35_1000_4829.tiff']) {
+        await fsa.write(fsa.toUrl(root + file), tiffBytes);
+      }
+
+      await commandTileIndexValidate.handler({
+        ...baseArguments,
+        location: [folders.map((folder) => fsa.toUrl(root + folder))],
+      });
+
+      const fileList: unknown = await fsa.readJson(fsa.toUrl('file:///tmp/tile-index-validate/file-list.json'));
+      assert.deepEqual(fileList, [
+        { output: 'BG35_1000_4829', input: expected.map((file) => root + file), includeDerived: false },
+      ]);
+    });
+  }
+
   it('should fail with 0 byte tiffs', async () => {
     await fsa.write(fsa.toUrl('file:///tmp/empty/foo.tiff'), Buffer.from(''));
     const ret = await commandTileIndexValidate
@@ -293,7 +377,7 @@ describe('validate', () => {
     await commandTileIndexValidate.handler({
       ...baseArguments,
       targetEpsg: undefined,
-      scale: 5000 as GridSize,
+      scale: 5000,
     });
 
     const outputFileList = await fsa.readJson(fsa.toUrl('file:///tmp/tile-index-validate/file-list.json'));
@@ -319,41 +403,83 @@ describe('GridSizeFromString', () => {
   });
 });
 
-describe('is8BitsTiff', () => {
-  it('should be a 8 bits TIFF', async () => {
-    const testTiff = await createTiff(pathToFileURL('./src/commands/tileindex-validate/__test__/data/8b.tiff'));
-    await assert.doesNotReject(validate8BitsTiff(testTiff));
+describe('validateTiffDataType', () => {
+  const dataDir = './src/commands/tileindex-validate/__test__/data';
+  it('should be a uint8 TIFF', async () => {
+    const testTiff = await createTiff(pathToFileURL(`${dataDir}/8b.tiff`));
+    assert.equal(await validateTiffDataType(testTiff, new Set(['uint8'])), 'uint8');
   });
-  it('should not be a 8 bits TIFF', async () => {
-    const testTiff = await createTiff(pathToFileURL('./src/commands/tileindex-validate/__test__/data/16b.tiff'));
-    await assert.rejects(validate8BitsTiff(testTiff), {
+  it('should not be a uint8 TIFF', async () => {
+    const testTiff = await createTiff(pathToFileURL(`${dataDir}/16b.tiff`));
+    await assert.rejects(validateTiffDataType(testTiff, new Set(['uint8'])), {
       name: 'Error',
-      message: `${process.cwd()}/src/commands/tileindex-validate/__test__/data/16b.tiff is not a 8 bits TIFF`,
+      message: `${process.cwd()}/src/commands/tileindex-validate/__test__/data/16b.tiff has unsupported data type: uint16. Expected: uint8`,
+    });
+
+    const ret = await validateTiffDataType(testTiff, new Set(['uint16']));
+    assert.equal(ret, 'uint16');
+  });
+  it('should read a float32 TIFF and reject it when only uint8/uint16 are allowed', async () => {
+    const testTiff = await createTiff(pathToFileURL(`${dataDir}/32f.tiff`));
+    assert.equal(await validateTiffDataType(testTiff, new Set(['float32'])), 'float32');
+    await assert.rejects(validateTiffDataType(testTiff, new Set(['uint8', 'uint16'])), {
+      name: 'Error',
+      message: `${process.cwd()}/src/commands/tileindex-validate/__test__/data/32f.tiff has unsupported data type: float32. Expected: uint8, uint16`,
+    });
+  });
+  it('should read an int16 TIFF and reject it when only uint8/uint16 are allowed', async () => {
+    const testTiff = await createTiff(pathToFileURL(`${dataDir}/16i.tiff`));
+    assert.equal(await validateTiffDataType(testTiff, new Set(['int16'])), 'int16');
+    await assert.rejects(validateTiffDataType(testTiff, new Set(['uint8', 'uint16'])), {
+      name: 'Error',
+      message: `${process.cwd()}/src/commands/tileindex-validate/__test__/data/16i.tiff has unsupported data type: int16. Expected: uint8, uint16`,
     });
   });
 });
 
 describe('validatePreset', () => {
+  const dataDir = './src/commands/tileindex-validate/__test__/data';
   async function testValidatePresetTiffs(t: it.TestContext, preset: string): Promise<void> {
-    const test16bTiff = await createTiff(pathToFileURL('./src/commands/tileindex-validate/__test__/data/16b.tiff'));
-    const test8bTiff = await createTiff(pathToFileURL('./src/commands/tileindex-validate/__test__/data/8b.tiff'));
+    const test8bTiff = await createTiff(pathToFileURL(`${dataDir}/8b.tiff`));
+    const test32fTiff = await createTiff(pathToFileURL(`${dataDir}/32f.tiff`));
+    const test16iTiff = await createTiff(pathToFileURL(`${dataDir}/16i.tiff`));
     const fatalStub = t.mock.method(logger, 'fatal');
-    await assert.rejects(validatePreset(preset, [test16bTiff, test16bTiff, test8bTiff]), {
+    await assert.rejects(validatePreset(preset, [test8bTiff, test32fTiff, test16iTiff]), {
       name: 'Error',
       message: `Tiff preset:"${preset}" validation failed`,
     });
 
     assert.equal(fatalStub.mock.callCount(), 2); // Should be called per tiff failure
-    const opts = fatalStub.mock.calls[0]?.arguments[0] as unknown as Record<string, string>;
+    const opts = fatalStub.mock.calls[0]?.arguments[0] as Record<string, string>;
     assert.equal(opts['preset'], preset);
-    assert.ok(opts['reason']?.includes('is not a 8 bits TIFF'));
+    assert.ok(opts['reason']?.includes('unsupported data type'));
   }
   it('should validate multiple tiffs for webp', async (t) => {
     await testValidatePresetTiffs(t, 'webp');
   });
+  it('should accept uint16 tiffs for webp', async () => {
+    const test16bTiff = await createTiff(pathToFileURL(`${dataDir}/16b.tiff`));
+    await assert.doesNotReject(validatePreset('webp', [test16bTiff, test16bTiff]));
+  });
   it('should validate multiple tiffs for rgbnir_zstd', async (t) => {
     await testValidatePresetTiffs(t, 'rgbnir_zstd');
   });
+  for (const preset of ['webp', 'rgbnir_zstd']) {
+    for (const [dataType, file] of [
+      ['float32', '32f.tiff'],
+      ['int16', '16i.tiff'],
+    ]) {
+      it(`should reject ${dataType} tiffs for ${preset}`, async (t) => {
+        const testTiff = await createTiff(pathToFileURL(`${dataDir}/${file}`));
+        const fatalStub = t.mock.method(logger, 'fatal');
+        await assert.rejects(validatePreset(preset, [testTiff]), {
+          message: `Tiff preset:"${preset}" validation failed`,
+        });
+        const opts = fatalStub.mock.calls[0]?.arguments[0] as Record<string, string>;
+        assert.ok(opts['reason']?.includes(`unsupported data type: ${dataType}`));
+      });
+    }
+  }
 });
 
 describe('TiffFromMisalignedTiff', () => {
@@ -474,6 +600,71 @@ describe('GSD handling', () => {
       const outputGsd = await fsa.readJson(fsa.toUrl('file:///tmp/tile-index-validate/gsd'));
       assert.deepEqual(outputGsd, '1');
     }
+  });
+});
+
+describe('DataType handling', () => {
+  const memory = new FsMemory();
+
+  before(() => {
+    fsa.register('memory://', memory);
+    fsa.register('file:///tmp', memory);
+  });
+  beforeEach(() => {
+    memory.files.clear();
+  });
+
+  const baseArguments = {
+    config: undefined,
+    verbose: false,
+    include: undefined,
+    validate: false,
+    preset: 'none',
+    sourceEpsg: undefined,
+    targetEpsg: 2193,
+    includeDerived: false,
+    location: [[fsa.toUrl('s3://test')]],
+    scale: 1000 as GridSize,
+    forceOutput: true,
+    concurrency: 1,
+  };
+
+  it('should output the data type as its sample-format-qualified name, not the raw bit depth', async (t) => {
+    const fakeTiff = FakeCogTiff.fromTileName('AS21_1000_0101');
+    t.mock.method(TiffLoader, 'load', () => Promise.resolve([fakeTiff]));
+
+    await commandTileIndexValidate.handler(baseArguments);
+
+    const outputDataType = await fsa.read(fsa.toUrl('file:///tmp/tile-index-validate/data-type'));
+    assert.strictEqual(outputDataType.toString(), 'uint8');
+  });
+
+  it('should fail, naming the failed sources, if no TIFFs yield a data type', async (t) => {
+    const fakeTiff1 = FakeCogTiff.fromTileName('AS21_1000_0101');
+    const fakeTiff2 = FakeCogTiff.fromTileName('AT21_1000_0101');
+    t.mock.method(fakeTiff1.images[0], 'fetch', () => null);
+    t.mock.method(fakeTiff2.images[0], 'fetch', () => null);
+    t.mock.method(TiffLoader, 'load', () => Promise.resolve([fakeTiff1, fakeTiff2]));
+
+    const ret = await commandTileIndexValidate.handler(baseArguments).catch((e: Error) => e);
+    assert.ok(String(ret).startsWith('Error: No data types found in the TIFFs: '));
+    assert.ok(String(ret).includes('AS21_1000_0101.tiff'));
+    assert.ok(String(ret).includes('AT21_1000_0101.tiff'));
+  });
+
+  it('should fail if TIFFs have different data types, even when each is allowed by the preset', async (t) => {
+    const fakeTiff1 = FakeCogTiff.fromTileName('AS21_1000_0101');
+    const fakeTiff2 = FakeCogTiff.fromTileName('AT21_1000_0101');
+    t.mock.method(fakeTiff2.images[0], 'fetch', (tag: TiffTag) => {
+      if (tag === TiffTag.BitsPerSample) return [16, 16, 16];
+      if (tag === TiffTag.SampleFormat) return [SampleFormat.Uint, SampleFormat.Uint, SampleFormat.Uint];
+      return null;
+    });
+    t.mock.method(TiffLoader, 'load', () => Promise.resolve([fakeTiff1, fakeTiff2]));
+
+    await assert.rejects(commandTileIndexValidate.handler({ ...baseArguments, preset: 'webp' }), {
+      message: 'Inconsistent data types found: uint8, uint16',
+    });
   });
 });
 

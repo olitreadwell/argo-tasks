@@ -1,5 +1,111 @@
 # Changelog
 
+## [8.1.4](https://github.com/linz/argo-tasks/compare/v8.1.3...v8.1.4) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deps:** release zod 4.6.7 and fast-uri 3.1.9 security fixes ([#1416](https://github.com/linz/argo-tasks/issues/1416)) ([9729185](https://github.com/linz/argo-tasks/commit/9729185f81a3c3e14745c1b0f9bbdcb14b7174bf))
+* update node to patch against CVE-2026-111497 TDE-2184 ([#1421](https://github.com/linz/argo-tasks/issues/1421)) ([dfef2d0](https://github.com/linz/argo-tasks/commit/dfef2d037ad8241249b51f794b62a1762c4e0504))
+
+## [8.1.3](https://github.com/linz/argo-tasks/compare/v8.1.2...v8.1.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** upgrade @linzjs/style to v6 TDE-2164 ([#1403](https://github.com/linz/argo-tasks/issues/1403)) ([f6b24df](https://github.com/linz/argo-tasks/commit/f6b24df5ef0563b18e2da7bd397179bd549c6007))
+
+## [8.1.2](https://github.com/linz/argo-tasks/compare/v8.1.1...v8.1.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **deps:** manual npm audit fix TDE-2130 ([#1389](https://github.com/linz/argo-tasks/issues/1389)) ([4370952](https://github.com/linz/argo-tasks/commit/43709525b2b72584f64092edd83a81f041d56257))
+
+## [8.1.1](https://github.com/linz/argo-tasks/compare/v8.1.0...v8.1.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **deps:** bump fast-uri from 3.0.6 to 3.1.8 ([#1363](https://github.com/linz/argo-tasks/issues/1363)) ([0ff58c4](https://github.com/linz/argo-tasks/commit/0ff58c465f0278578ec8b5fc50762921eeb78018))
+* **deps:** bump the aws group across 1 directory with 3 updates ([#1377](https://github.com/linz/argo-tasks/issues/1377)) ([6f4f105](https://github.com/linz/argo-tasks/commit/6f4f1053ccc4e54b21837d912cafb0e002f2fb4f))
+
+## [8.1.0](https://github.com/linz/argo-tasks/compare/v8.0.0...v8.1.0) (2026-10-14)
+
+
+### Features
+
+* allow mismatched datatype for odr and resupply tde-2108 ([#1368](https://github.com/linz/argo-tasks/issues/1368)) ([6428569](https://github.com/linz/argo-tasks/commit/6428569d377dbbbd67f48f43a66a912eb5c030ea))
+* support 16-bit webp and remove support for 32-bit rgbnir_zstd TDE-2107 ([#1365](https://github.com/linz/argo-tasks/issues/1365)) ([4071dfd](https://github.com/linz/argo-tasks/commit/4071dfd89ff4e0fd961038b48e140ce0b90d2bf0))
+
+## [8.0.0](https://github.com/linz/argo-tasks/compare/v7.0.2...v8.0.0) (2026-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* error existing odr url TDE-2110 ([#1367](https://github.com/linz/argo-tasks/issues/1367))
+
+### Features
+
+* error existing odr url TDE-2110 ([#1367](https://github.com/linz/argo-tasks/issues/1367)) ([461aa99](https://github.com/linz/argo-tasks/commit/461aa99a2eca44e566bebe20d2d65197abc77bdc))
+
+## [7.0.2](https://github.com/linz/argo-tasks/compare/v7.0.1...v7.0.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* unarchive file restore error zstd error prefix unknown tde-1682 ([#1358](https://github.com/linz/argo-tasks/issues/1358)) ([8e8276c](https://github.com/linz/argo-tasks/commit/8e8276cae8d37d29148e1dcb03679f4b263b82c4))
+
+## [7.0.1](https://github.com/linz/argo-tasks/compare/v7.0.0...v7.0.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* ensure unique files and correct order TDE-2090 ([#1360](https://github.com/linz/argo-tasks/issues/1360)) ([49aeb42](https://github.com/linz/argo-tasks/commit/49aeb42282203f9a161e2785227c0355249a81ad))
+
+## [7.0.0](https://github.com/linz/argo-tasks/compare/v6.1.0...v7.0.0) (2026-09-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* breaking change for version bump of stac setup data_type TDE-1925 ([#1357](https://github.com/linz/argo-tasks/issues/1357))
+
+### Features
+
+* breaking change for version bump of stac setup data_type TDE-1925 ([#1357](https://github.com/linz/argo-tasks/issues/1357)) ([5dde574](https://github.com/linz/argo-tasks/commit/5dde57447656cd7378d381050165eb1934b5a12d))
+* **stac-setup:** add datatype to stac setup odr TDE-2032 ([#1351](https://github.com/linz/argo-tasks/issues/1351)) ([690880b](https://github.com/linz/argo-tasks/commit/690880b9bf12d723faec7576544fd3d619a70deb))
+* **tileindex-validate:** output bit depth from tileindex-validate TDE-2031 ([#1349](https://github.com/linz/argo-tasks/issues/1349)) ([17dfb50](https://github.com/linz/argo-tasks/commit/17dfb50fdf6c0911c019ea7b17d2fdf786671e29))
+
+## [6.1.0](https://github.com/linz/argo-tasks/compare/v6.0.0...v6.1.0) (2026-09-10)
+
+
+### Features
+
+* allow 16 bit tiffs with rgb+nir ([#1311](https://github.com/linz/argo-tasks/issues/1311)) ([7a629e7](https://github.com/linz/argo-tasks/commit/7a629e7f9c78ac6fef72c071d34b4717c6cb246c))
+
+
+### Bug Fixes
+
+* vector tileset prs should not be draft ([#1354](https://github.com/linz/argo-tasks/issues/1354)) ([62a873f](https://github.com/linz/argo-tasks/commit/62a873f86b2f47aa5c31243966b42f355ab40251))
+
+## [6.0.0](https://github.com/linz/argo-tasks/compare/v5.7.0...v6.0.0) (2026-08-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* switch to using GitHub App for PR creation TDE-2022 ([#1347](https://github.com/linz/argo-tasks/issues/1347))
+
+### Features
+
+* switch to using GitHub App for PR creation TDE-2022 ([#1347](https://github.com/linz/argo-tasks/issues/1347)) ([f9a24b3](https://github.com/linz/argo-tasks/commit/f9a24b3ae3a50d4c230de4a9366296048d50cfc7))
+
+## [5.7.0](https://github.com/linz/argo-tasks/compare/v5.6.0...v5.7.0) (2026-08-19)
+
+
+### Features
+
+* make basemaps pull requests draft by default ([#1341](https://github.com/linz/argo-tasks/issues/1341)) ([d866534](https://github.com/linz/argo-tasks/commit/d8665345f0db7adcf972cd04ac3ff356c39646a3))
+
 ## [5.6.0](https://github.com/linz/argo-tasks/compare/v5.5.0...v5.6.0) (2026-08-18)
 
 

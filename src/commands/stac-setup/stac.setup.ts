@@ -1,15 +1,19 @@
 import { fsa } from '@chunkd/fs';
-import { command, option, optional, string } from 'cmd-ts';
+import type { Tiff } from '@cogeotiff/core';
+import { command, number, option, optional, string } from 'cmd-ts';
 import type { StacCollection } from 'stac-ts';
-import ulid from 'ulid';
+import { ulid } from 'ulid';
 
 import { CliInfo } from '../../cli.info.ts';
 import { logger } from '../../log.ts';
+import { extractBandInformation } from '../../utils/band.ts';
 import { protocolAwareString } from '../../utils/filelist.ts';
 import type { GeospatialDataCategory, StacCollectionLinz } from '../../utils/metadata.ts';
+import { RgbCategories } from '../../utils/metadata.ts';
 import { slugify } from '../../utils/slugify.ts';
 import { config, MeterAsString, registerCli, Url, UrlFolder, urlPathEndsWith, verbose } from '../common.ts';
-import { loadFirstTiff } from '../generate-path/path.generate.ts';
+import type { PathMetadata } from '../generate-path/path.generate.ts';
+import { formatBucketName, generatePath, loadFirstTiff } from '../generate-path/path.generate.ts';
 
 export interface SlugMetadata {
   geospatialCategory: GeospatialDataCategory;
@@ -60,6 +64,12 @@ export const commandStacSetup = command({
       description: 'GSD of dataset, e.g. 0.3',
     }),
 
+    dataType: option({
+      type: string,
+      long: 'data-type',
+      description: 'Data type of dataset, e.g. uint16',
+    }),
+
     region: option({
       type: string,
       long: 'region',
@@ -97,6 +107,18 @@ export const commandStacSetup = command({
       defaultValueIsSerializable: true,
       defaultValue: () => fsa.toUrl('file:///tmp/stac-setup/'),
     }),
+
+    targetBucketName: option({
+      type: string,
+      long: 'target-bucket-name',
+      description: 'Target bucket name, e.g. nz-imagery',
+    }),
+
+    targetEpsg: option({
+      type: number,
+      long: 'target-epsg',
+      description: 'EPSG of the standardised output files for checking odr_url target',
+    }),
   },
 
   async handler(args) {
@@ -109,16 +131,43 @@ export const commandStacSetup = command({
         ? args.odrUrl
         : new URL('collection.json', args.odrUrl);
       const collection = await fsa.readJson<StacCollection & StacCollectionLinz>(collectionLocation);
-      if (collection == null)
+      if (collection == null) {
         throw new Error(`Failed to get collection.json from ${protocolAwareString(collectionLocation)}.`);
+      }
       const slug = collection['linz:slug'];
       if (slug !== slugify(slug)) throw new Error(`Invalid slug: ${slug}.`);
 
-      const gsd =
-        Number(collection['gsd']) || (await loadFirstTiff(collectionLocation, collection)).images[0]?.resolution[0];
+      let tiff: Tiff | undefined;
+      const getTiff = async (): Promise<Tiff> => (tiff ??= await loadFirstTiff(collectionLocation, collection));
+
+      const gsd = Number(collection['gsd']) || (await getTiff()).images[0]?.resolution[0];
       if (gsd !== Number(args.gsd)) {
         logger.error({ gsd, expected: args.gsd }, 'StacSetup:Error:GSDMismatch');
         throw new Error(`GSD at ODR URL [${gsd}] does not match new TIFF GSD [${args.gsd}]`);
+      }
+
+      const dataType = collection['data_type'] ?? (await extractBandInformation(await getTiff()))[0];
+
+      if (dataType !== args.dataType) {
+        const isAllowedMismatch =
+          dataType === 'uint8' &&
+          args.dataType === 'uint16' &&
+          RgbCategories.has(collection['linz:geospatial_category']);
+        if (!isAllowedMismatch) {
+          logger.error({ dataType, expected: args.dataType }, 'StacSetup:Error:DataTypeMismatch');
+          throw new Error(`Data type at ODR URL [${dataType}] does not match new TIFF data type [${args.dataType}]`);
+        }
+        logger.warn(
+          {
+            odrUrl: protocolAwareString(collectionLocation),
+            odrDataType: dataType,
+            sourceDataType: args.dataType,
+            geospatialCategory: collection['linz:geospatial_category'],
+            reason:
+              'RGB imagery is standardised to 8-bit WebP, so a uint16 resupply of a uint8 ODR collection is allowed',
+          },
+          'StacSetup:Warn:OdrDataTypeMismatchAllowed',
+        );
       }
 
       const collectionId = collection['id'];
@@ -128,7 +177,7 @@ export const commandStacSetup = command({
       if (args.startDate && args.startYear) throw new Error('--start-date and --start-year are mutually exclusive');
       if (args.endDate && args.endYear) throw new Error('--end-date and --end-year are mutually exclusive');
 
-      const metadata: SlugMetadata = {
+      const slugMetadata: SlugMetadata = {
         geospatialCategory: args.geospatialCategory as GeospatialDataCategory,
         region: args.region,
         surveyId: args.surveyId,
@@ -136,8 +185,27 @@ export const commandStacSetup = command({
         date: formatDate(args.startDate ?? args.startYear, args.endDate ?? args.endYear),
         gsd: args.gsd,
       };
-      const slug = slugFromMetadata(metadata);
-      const collectionId = ulid.ulid();
+
+      const slug = slugFromMetadata(slugMetadata);
+
+      const pathMetadata: PathMetadata = {
+        geospatialCategory: args.geospatialCategory,
+        region: args.region,
+        gsd: Number(args.gsd),
+        slug: slug,
+        targetBucketName: formatBucketName(args.targetBucketName),
+        epsg: args.targetEpsg,
+      };
+
+      const newOdrUrl = generatePath(pathMetadata);
+      const collectionLocation = new URL('collection.json', newOdrUrl);
+
+      if (await fsa.exists(collectionLocation)) {
+        throw new Error(
+          `An existing collection was found at ${protocolAwareString(collectionLocation)}. To overwrite or update the existing collection, supply its ODR URL using odr_url.`,
+        );
+      }
+      const collectionId = ulid();
       await writeSetupFiles(slug, collectionId, args.output);
       logger.info({ duration: performance.now() - startTime, slug, collectionId }, 'StacSetup:Done');
     }

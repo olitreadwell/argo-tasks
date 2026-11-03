@@ -5,7 +5,7 @@ import type * as st from 'stac-ts';
 
 import { CliInfo } from '../../cli.info.ts';
 import { logger } from '../../log.ts';
-import { DEFAULT_PRETTIER_FORMAT } from '../../utils/config.ts';
+import { DEFAULT_FORMAT } from '../../utils/config.ts';
 import { protocolAwareString } from '../../utils/filelist.ts';
 import { GithubApi } from '../../utils/github.ts';
 import { config, registerCli, Url, verbose } from '../common.ts';
@@ -14,13 +14,9 @@ import { prettyPrint } from '../pretty-print/pretty.print.ts';
 const imageryRepo = 'linz/imagery';
 
 /**
- * Valid repositories, mapped to the email address used for the PR author
+ * Repositories that a STAC collection may be imported into
  */
-export const BotEmails: Record<string, string> = {
-  'linz/coastal': 'hydrosurvey@linz.govt.nz',
-  'linz/elevation': 'elevation@linz.govt.nz',
-  [imageryRepo]: 'imagery@linz.govt.nz',
-};
+export const ValidRepos: string[] = ['linz/coastal', 'linz/elevation', imageryRepo];
 
 export const commandStacGithubImport = command({
   name: 'stac-github-import',
@@ -42,7 +38,7 @@ export const commandStacGithubImport = command({
       description: 'Target location for the collection.json file',
     }),
     repoName: option({
-      type: oneOf(Object.keys(BotEmails)),
+      type: oneOf(ValidRepos),
       long: 'repo-name',
       defaultValue: () => imageryRepo,
       defaultValueIsSerializable: true,
@@ -66,9 +62,6 @@ export const commandStacGithubImport = command({
     registerCli(this, args);
 
     const gh = new GithubApi(args.repoName);
-
-    const botEmail = BotEmails[args.repoName];
-    if (botEmail == null) throw new Error(`${args.repoName} is not a valid GitHub repository`);
 
     const basemapsConfigLocation = new URL('config-url', args.source);
     const prBody: string[] = [];
@@ -112,7 +105,7 @@ export const commandStacGithubImport = command({
     const titleTicketSuffix = args.ticket ? ` ${args.ticket}` : '';
     const title = `feat: import ${collection.title}${titleTicketSuffix}`;
 
-    const collectionFileContent = await prettyPrint(JSON.stringify(collection), DEFAULT_PRETTIER_FORMAT);
+    const collectionFileContent = await prettyPrint(JSON.stringify(collection), DEFAULT_FORMAT);
     const collectionFile = { path: targetCollectionPath, content: collectionFileContent };
     const parametersFileContent = {
       source: args.source,
@@ -128,7 +121,7 @@ export const commandStacGithubImport = command({
     };
     logger.info({ commit: title, branch }, 'Git:Commit');
     // create pull request
-    const pr = await gh.createPullRequest(branch, title, botEmail, [collectionFile, parametersFile], prBody.join('\n'));
+    const pr = await gh.createPullRequest(branch, title, [collectionFile, parametersFile], prBody.join('\n'));
     if (pr != null) {
       const prUrl = new URL(`https://github.com/${args.repoName}/pull/${pr}`);
       logger.info({ prUrl: protocolAwareString(prUrl) }, 'Git:PullRequestCreated');

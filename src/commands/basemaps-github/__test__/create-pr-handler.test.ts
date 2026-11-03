@@ -1,10 +1,8 @@
-import assert from 'node:assert';
-import { afterEach, it } from 'node:test';
-
 import { TileSetType } from '@basemaps/config/build/config/tile.set.js';
 import { EpsgCode } from '@basemaps/geo';
 import { fsa } from '@chunkd/fs';
-import type { StacVersion } from 'stac-ts';
+import assert from 'node:assert';
+import { afterEach, it } from 'node:test';
 
 import { anySlug } from '../../../utils/__test__/slugify.test.ts';
 import { GithubApi } from '../../../utils/github.ts';
@@ -20,7 +18,7 @@ await it('basemapsCreatePullRequest.handler should handle S3 target', async (t) 
   const targetUrl = `s3://linz-basemaps/${EpsgCode.Nztm2000}/${anySlug()}`;
   t.mock.method(fsa, 'readJson', () => {
     return Promise.resolve({
-      stac_version: '1.0.0' as StacVersion,
+      stac_version: '1.0.0',
       type: 'Collection',
       id: 'b871c4a7-2d8e-4cec-997a-ed755cf542b9',
       title: 'any-title',
@@ -35,7 +33,11 @@ await it('basemapsCreatePullRequest.handler should handle S3 target', async (t) 
       ],
     });
   });
-  process.env['GITHUB_API_TOKEN'] = 'any-github-api-token';
+  // `@octokit/auth-app` requires a numeric app id, but does not parse the private key until a
+  // request is made, and every request is mocked below
+  process.env['GITHUB_APP_ID'] = '1';
+  process.env['GITHUB_APP_PRIVATE_KEY'] = 'any-github-app-private-key';
+  process.env['GITHUB_APP_INSTALLATION_ID'] = '2';
   t.mock.method(GithubApi.prototype, 'getContent', () => {
     return Promise.resolve(
       Buffer.from(

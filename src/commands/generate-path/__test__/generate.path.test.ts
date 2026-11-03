@@ -1,7 +1,6 @@
+import { fsa, FsMemory } from '@chunkd/fs';
 import assert from 'node:assert';
 import { beforeEach, describe, it } from 'node:test';
-
-import { fsa, FsMemory } from '@chunkd/fs';
 
 import { RgbaNztm2000Tiff } from '../../../__test__/tiff.util.ts';
 import type { CommandArguments } from '../../../utils/type.util.ts';
@@ -9,8 +8,7 @@ import { UrlFolder } from '../../common.ts';
 import { SampleCollection } from '../../generate-path/__test__/sample.ts';
 import { FakeCogTiff } from '../../tileindex-validate/__test__/tileindex.validate.data.ts';
 import type { PathMetadata } from '../path.generate.ts';
-import { commandGeneratePath } from '../path.generate.ts';
-import { extractEpsg, extractGsd, generatePath } from '../path.generate.ts';
+import { commandGeneratePath, extractEpsg, extractGsd, generatePath } from '../path.generate.ts';
 
 describe('GeneratePathImagery', () => {
   it('Should match - urban aerial from slug', () => {
@@ -234,7 +232,7 @@ describe('gsd', () => {
 });
 
 describe('metadata from collection', () => {
-  it('Should return urban aerial photos path', async () => {
+  it('Should return urban aerial photos path', () => {
     const collection = structuredClone(SampleCollection);
 
     const metadata: PathMetadata = {
@@ -265,7 +263,8 @@ describe('command.generatePath', () => {
     source: fsa.toUrl(''),
   };
 
-  it('should generate a output', async () => {
+  it('should generate a output', async (t) => {
+    t.mock.method(fsa, 'exists', () => Promise.resolve(false));
     await fsa.write(
       fsa.toUrl('memory://bucket/source/test/collection.json'),
       Buffer.from(
@@ -295,5 +294,47 @@ describe('command.generatePath', () => {
 
     const output = await fsa.read(fsa.toUrl('/tmp/generate-path/target'));
     assert.deepEqual(output.toString('utf-8'), 's3://some-output-bucket/wellington/source-test/rgb/2193/');
+  });
+
+  it('should error when generated ODR destination already exists', async (t) => {
+    t.mock.method(fsa, 'exists', () => Promise.resolve(true));
+
+    await fsa.write(
+      fsa.toUrl('memory://bucket/source/test/collection.json'),
+      Buffer.from(
+        JSON.stringify({
+          'linz:geospatial_category': 'urban-aerial-photos',
+          'linz:region': 'wellington',
+          'linz:slug': 'source-test',
+          links: [{ href: './BQ32.json', rel: 'item' }],
+        }),
+      ),
+    );
+
+    await fsa.write(
+      fsa.toUrl('memory://bucket/source/test/BQ32.json'),
+      Buffer.from(
+        JSON.stringify({
+          assets: {
+            visual: {
+              href: './BQ32.tiff',
+            },
+          },
+        }),
+      ),
+    );
+
+    await fsa.write(fsa.toUrl('memory://bucket/source/test/BQ32.tiff'), RgbaNztm2000Tiff);
+
+    await assert.rejects(
+      commandGeneratePath.handler({
+        ...baseArgs,
+        source: await UrlFolder.from('memory://bucket/source/test/'),
+      }),
+      {
+        message:
+          'An existing collection was found at s3://some-output-bucket/wellington/source-test/rgb/2193/collection.json. To overwrite or update the existing collection, supply its ODR URL using odr_url.',
+      },
+    );
   });
 });
