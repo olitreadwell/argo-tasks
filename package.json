@@ -1,6 +1,6 @@
 {
   "name": "@linzjs/argo-tasks",
-  "version": "8.1.4",
+  "version": "8.2.0",
   "private": true,
   "license": "MIT",
   "author": {
@@ -29,9 +29,9 @@
     "test": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1149.0",
-    "@aws-sdk/credential-providers": "^3.1149.0",
-    "@aws-sdk/lib-storage": "^3.1149.0",
+    "@aws-sdk/client-s3": "^3.1152.0",
+    "@aws-sdk/credential-providers": "^3.1152.0",
+    "@aws-sdk/lib-storage": "^3.1152.0",
     "@basemaps/config": "^8.13.2",
     "@basemaps/geo": "^8.9.1",
     "@chunkd/fs": "^11.5.3",
@@ -60,7 +60,7 @@
     "@linzjs/style": "^6.1.1",
     "@types/node": "~24.5.0",
     "stac-ts": "^1.0.4",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": "^24.22.1"
