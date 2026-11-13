@@ -1,6 +1,6 @@
 {
   "name": "@linzjs/argo-tasks",
-  "version": "8.3.0",
+  "version": "8.3.1",
   "private": true,
   "license": "MIT",
   "author": {
@@ -63,6 +63,6 @@
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": "^24.22.1"
+    "node": "^24.22.3"
   }
 }
